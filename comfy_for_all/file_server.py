@@ -10,7 +10,7 @@ app = Flask(__name__)
 if not os.path.isfile("config.py"):
     sys.exit("'config.py' not found! Please add it and try again.")
 else:
-    import comfy_for_all.config as config
+    import config
 
 # Keep a list of processed jobs to avoid reprocessing
 processed_jobs = set()
@@ -20,10 +20,12 @@ def get_job():
     # Get a job from the queue folder
     queue_folder = config.queue_folder
     if not os.path.exists(queue_folder):
+        print("Queue folder does not exist")
         return jsonify({"error": "Queue folder does not exist"}), 404
 
     files = [f for f in os.listdir(queue_folder) if f.endswith('.json')]
     if not files:
+        print("No jobs available")
         return jsonify({"error": "No jobs available"}), 404
 
     # Sort files by modification time to get the oldest job first

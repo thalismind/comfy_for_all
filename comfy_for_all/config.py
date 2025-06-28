@@ -1,1 +1,1 @@
-queue_folder = "jobs"
+queue_folder = "../jobs"

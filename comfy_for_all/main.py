@@ -8,28 +8,30 @@ import urllib.request
 import urllib.parse
 from PIL import Image
 import io
+import argparse
+import requests
+import time
 
-server_address = "10.2.2.81:8188"
-client_id = str(uuid.uuid4())
+from models import ImageJob
 
-def queue_prompt(prompt):
-    p = {"prompt": prompt, "client_id": client_id}
+def queue_prompt(args, prompt):
+    p = {"prompt": prompt, "client_id": args.client_id}
     data = json.dumps(p).encode('utf-8')
-    req =  urllib.request.Request("http://{}/prompt".format(server_address), data=data)
+    req =  urllib.request.Request("http://{}/prompt".format(args.comfy_server), data=data)
     return json.loads(urllib.request.urlopen(req).read())
 
-def get_image(filename, subfolder, folder_type):
+def get_image(args, filename, subfolder, folder_type):
     data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
     url_values = urllib.parse.urlencode(data)
-    with urllib.request.urlopen("http://{}/view?{}".format(server_address, url_values)) as response:
+    with urllib.request.urlopen("http://{}/view?{}".format(args.comfy_server, url_values)) as response:
         return response.read()
 
-def get_history(prompt_id):
-    with urllib.request.urlopen("http://{}/history/{}".format(server_address, prompt_id)) as response:
+def get_history(args, prompt_id):
+    with urllib.request.urlopen("http://{}/history/{}".format(args.comfy_server, prompt_id)) as response:
         return json.loads(response.read())
 
-def get_images(ws, prompt):
-    prompt_id = queue_prompt(prompt)['prompt_id']
+def get_images(args, ws, prompt):
+    prompt_id = queue_prompt(args, prompt)['prompt_id']
     output_images = {}
     while True:
         out = ws.recv()
@@ -45,24 +47,33 @@ def get_images(ws, prompt):
             # preview_image = Image.open(bytesIO) # This is your preview in PIL image format, store it in a global
             continue #previews are binary data
 
-    history = get_history(prompt_id)[prompt_id]
+    history = get_history(args, prompt_id)[prompt_id]
     for node_id in history['outputs']:
         node_output = history['outputs'][node_id]
         images_output = []
         if 'images' in node_output:
             for image in node_output['images']:
-                image_data = get_image(image['filename'], image['subfolder'], image['type'])
+                image_data = get_image(args, image['filename'], image['subfolder'], image['type'])
                 images_output.append(image_data)
         output_images[node_id] = images_output
 
     return output_images
 
-def generate_prompt():
+def parse_size(size_str):
+    """Parse a size string in the format 'widthxheight'."""
+    try:
+        width, height = map(int, size_str.split('x'))
+        return width, height
+    except ValueError:
+        raise ValueError("Size must be in the format 'widthxheight', e.g., '512x512'.")
+
+def generate_prompt(job: ImageJob):
+  width, height = parse_size(job.size)
   prompt = {
       "3": {
           "class_type": "KSampler",
           "inputs": {
-              "cfg": 8,
+              "cfg": job.cfg,
               "denoise": 1,
               "latent_image": [
                   "5",
@@ -82,22 +93,22 @@ def generate_prompt():
               ],
               "sampler_name": "euler",
               "scheduler": "normal",
-              "seed": 8566257,
-              "steps": 20
+              "seed": job.seed,
+              "steps": job.steps,
           }
       },
       "4": {
           "class_type": "CheckpointLoaderSimple",
           "inputs": {
-              "ckpt_name": "pony/realcartoon-pony.safetensors"
+              "ckpt_name": job.model,
           }
       },
       "5": {
           "class_type": "EmptyLatentImage",
           "inputs": {
-              "batch_size": 1,
-              "height": 512,
-              "width": 512
+              "batch_size": job.batch_size,
+              "height": height,
+              "width": width,
           }
       },
       "6": {
@@ -107,7 +118,7 @@ def generate_prompt():
                   "4",
                   1
               ],
-              "text": "masterpiece best quality girl"
+              "text": job.prompt,
           }
       },
       "7": {
@@ -117,7 +128,7 @@ def generate_prompt():
                   "4",
                   1
               ],
-              "text": "bad hands"
+              "text": job.negative_prompt,
           }
       },
       "8": {
@@ -146,17 +157,12 @@ def generate_prompt():
   }
   return prompt
 
-def run_job(job):
-  prompt = generate_prompt()
-  #set the text prompt for our positive CLIPTextEncode
-  prompt["6"]["inputs"]["text"] = "masterpiece best quality man"
-
-  #set the seed for our KSampler node
-  prompt["3"]["inputs"]["seed"] = 5
+def run_job(args, job):
+  prompt = generate_prompt(job)
 
   ws = websocket.WebSocket()
-  ws.connect("ws://{}/ws?clientId={}".format(server_address, client_id))
-  images = get_images(ws, prompt)
+  ws.connect("ws://{}/ws?clientId={}".format(args.comfy_server, args.client_id))
+  images = get_images(args, ws, prompt)
   ws.close()
 
   for node_id in images:
@@ -164,6 +170,70 @@ def run_job(job):
       image = Image.open(io.BytesIO(image_data))
       image.show()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run a job on ComfyUI server.")
+    parser.add_argument('--job_server', type=str, default='http://127.0.0.1:5000', help='Job server address')
+    parser.add_argument('--comfy_server', type=str, default='127.0.0.1:8188', help='ComfyUI server address')
+    parser.add_argument('--client_id', type=str, default=str(uuid.uuid4()), help='Client ID for the WebSocket connection')
+    parser.add_argument('--single_job', action='store_true', help='Run a single job and exit')
+    parser.add_argument('--polling_interval', type=int, default=30, help='Polling interval in seconds for job fetching')
+    return parser.parse_args()
+
+
+def get_job(args):
+    response = requests.get(f"{args.job_server}/api/get-job")
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print("No jobs available or error fetching job.")
+        return None
+
+def job_loop(args):
+    while True:
+        # Get the next job from the server
+        job_data = get_job(args)
+        if job_data:
+            job = ImageJob(
+                id=job_data[0],
+                created_at=job_data[1],
+                updated_at=job_data[1], # what about 2?
+                job_type=job_data[3],
+                user=job_data[4],
+                prompt=job_data[5],
+                negative_prompt=job_data[6],
+                model=job_data[7],
+                steps=job_data[8],
+                seed=job_data[9],
+                # not sure what 10 is
+                size=job_data[11],
+                batch_size=job_data[12],
+                cfg=job_data[13]
+            )
+            print(f"Processing job: {job.id} with prompt: {job.prompt}")
+            run_job(args, job)
+        else:
+            print("No jobs available, waiting...")
+            time.sleep(args.polling_interval)
+
+
 if __name__ == "__main__":
-    job = None  # Replace with actual job data if needed
-    run_job(job)
+    args = parse_args()
+    if args.single_job:
+      job = ImageJob(
+          id=str(uuid.uuid4()),
+          created_at="2023-10-01T00:00:00Z",
+          updated_at="2023-10-01T00:00:00Z",
+          job_type="generate",
+          user=1,
+          prompt="A beautiful landscape",
+          negative_prompt="bad hands, blurry, low quality",
+          model="pony/realcartoon-pony.safetensors",
+          steps=50,
+          seed=42,
+          size="512x512",
+          batch_size=1,
+          cfg=7.5
+      )
+      run_job(job)
+    else:
+        job_loop(args)
