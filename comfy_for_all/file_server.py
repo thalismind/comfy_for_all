@@ -58,7 +58,7 @@ def upload_images():
     i = 0
     for file in files:
         if file.filename:
-            file.save(f'uploads/{channel}_{i}.png')
+            file.save(f'{config.upload_folder}/{channel}_{i}.png')
             saved_files.append(file.filename)
             i += 1
 
