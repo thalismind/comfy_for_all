@@ -165,13 +165,13 @@ def run_job(args, job):
   images = get_images(args, ws, prompt)
   ws.close()
 
-  images = []
+  output_images = []
   for node_id in images:
     for image_data in images[node_id]:
       image = Image.open(io.BytesIO(image_data))
-      images.append(image)
+      output_images.append(image)
 
-  return images
+  return output_images
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run a job on ComfyUI server.")
@@ -182,7 +182,6 @@ def parse_args():
     parser.add_argument('--polling_interval', type=int, default=30, help='Polling interval in seconds for job fetching')
     return parser.parse_args()
 
-
 def get_job(args):
     response = requests.get(f"{args.job_server}/api/get-job")
     if response.status_code == 200:
@@ -190,6 +189,15 @@ def get_job(args):
     else:
         print("No jobs available or error fetching job.")
         return None
+
+def upload_images(args, images, channel):
+    url = f"{args.job_server}/api/upload"
+    files = [('images', (f'image_{i}.png', io.BytesIO(image.tobytes()), 'image/png')) for i, image in enumerate(images)]
+    response = requests.post(url, files=files, params={'channel': channel})
+    if response.status_code == 200:
+        print("Images uploaded successfully.")
+    else:
+        print(f"Failed to upload images: {response.status_code} - {response.text}")
 
 def job_loop(args):
     while True:
@@ -215,6 +223,11 @@ def job_loop(args):
             print(f"Processing job: {job.id} with prompt: {job.prompt}")
             images = run_job(args, job)
             print(f"Job {job.id} completed with {len(images)} images.")
+            if not images:
+                print("No images generated, skipping upload.")
+                continue
+
+            upload_images(args, images, job.user)  # Upload images to the server
         else:
             print("No jobs available, waiting...")
             time.sleep(args.polling_interval)
