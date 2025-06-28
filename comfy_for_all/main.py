@@ -165,10 +165,13 @@ def run_job(args, job):
   images = get_images(args, ws, prompt)
   ws.close()
 
+  images = []
   for node_id in images:
     for image_data in images[node_id]:
       image = Image.open(io.BytesIO(image_data))
-      image.show()
+      images.append(image)
+
+  return images
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run a job on ComfyUI server.")
@@ -210,7 +213,8 @@ def job_loop(args):
                 cfg=job_data[13]
             )
             print(f"Processing job: {job.id} with prompt: {job.prompt}")
-            run_job(args, job)
+            images = run_job(args, job)
+            print(f"Job {job.id} completed with {len(images)} images.")
         else:
             print("No jobs available, waiting...")
             time.sleep(args.polling_interval)
