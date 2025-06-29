@@ -59,13 +59,13 @@ def add_file_hash_if_new(root, filepath):
 def hash_directory(root):
     if not os.path.exists(root):
         print(f"Directory {root} does not exist.")
-        return
+        return []
 
     # Find all .safetensors files in the directory using globs
     files = glob.glob(os.path.join(root, '**', '*.safetensors'), recursive=True)
     if not files:
         print(f"No .safetensors files found in {root}.")
-        return
+        return []
 
     print(f"Found {len(files)} .safetensors files in {root}.")
     for filepath in files:

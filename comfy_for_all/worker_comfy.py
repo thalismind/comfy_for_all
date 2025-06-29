@@ -197,8 +197,12 @@ def parse_args():
     parser.add_argument('--safetensors_dir', type=str, default='safetensors', help='Directory to store safetensors files')
     return parser.parse_args()
 
-def get_job(args):
-    response = requests.get(f"{args.job_server}/api/get-job")
+def get_job(args, hashes):
+    print(args, hashes)
+    data = {
+        "checkpoints": [hash[0] for hash in hashes],
+    }
+    response = requests.get(f"{args.job_server}/api/get-job", json=data)
     if response.status_code == 200:
         return response.json()
     else:
@@ -236,7 +240,7 @@ def job_loop(args):
 
         # Get the next job from the server
         print(f"GPU {idle_timer.gpu_index} has been idle for {idle_timer.idle_time:0.2f} seconds, getting next job.")
-        job_data = get_job(args)
+        job_data = get_job(args, hashes)
         if not job_data:
             print("No jobs available, waiting...")
             time.sleep(args.polling_interval)
