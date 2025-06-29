@@ -5,7 +5,7 @@ class ImageJob(BaseModel):
     requested_at: str
     started_at: str | None = None
     request_type: str
-    requester: str
+    # requester: str
     requested_prompt: str
     negative_prompt: str | None = None
     model: str

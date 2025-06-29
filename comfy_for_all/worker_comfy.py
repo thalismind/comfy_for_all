@@ -26,7 +26,10 @@ def queue_prompt(args, prompt):
 def get_image(args, filename, subfolder, folder_type):
     data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
     url_values = urllib.parse.urlencode(data)
-    with urllib.request.urlopen("http://{}/view?{}".format(args.comfy_server, url_values)) as response:
+    complete_url = "http://{}/view?{}".format(args.comfy_server, url_values)
+    print(f"Fetching image from: {complete_url}")
+
+    with urllib.request.urlopen(complete_url) as response:
         return response.read()
 
 def get_history(args, prompt_id):
@@ -71,7 +74,7 @@ def parse_size(size_str):
         raise ValueError("Size must be in the format 'widthxheight', e.g., '512x512'.")
 
 def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
-  width, height = parse_size(job.size)
+  width, height = parse_size(job.resolution)
   model_name = hash_to_model_name(job.model, hashes)
   seed = random.randint(0, 2**32 - 1)
   print(f"Using model {model_name} for job {job.id} with {job.batch_size} images of size {width}x{height} and seed {seed}.")
@@ -174,8 +177,10 @@ def run_job(args, job, hashes):
 
   output_images = []
   for node_id in images:
+    print(f"Processing images for node {node_id} with {len(images[node_id])} images.")
     for image_data in images[node_id]:
       image = Image.open(io.BytesIO(image_data))
+      print(f"Image size: {image.size}, mode: {image.mode}")
       output_images.append(image)
 
   return output_images
@@ -200,10 +205,10 @@ def get_job(args):
         print("No jobs available or error fetching job.")
         return None
 
-def upload_images(args, images, channel):
+def upload_images(args, images, job):
     url = f"{args.job_server}/api/upload"
     files = [('images', (f'image_{i}.png', io.BytesIO(image.tobytes()), 'image/png')) for i, image in enumerate(images)]
-    response = requests.post(url, files=files, params={'channel': channel})
+    response = requests.post(url, files=files, params={'channel': job.channel, 'job_id': job.id})
     if response.status_code == 200:
         print("Images uploaded successfully.")
     else:
@@ -231,21 +236,23 @@ def job_loop(args):
             time.sleep(args.polling_interval)
             continue
 
+        # Create an ImageJob instance from the job data
+        print("Received job data:", job_data)
         job = ImageJob(
-            id=job_data[0],
-            requested_at=job_data[1],
-            started_at=job_data[2],
-            request_type=job_data[3],
-            requester=job_data[4],
-            requested_prompt=job_data[5],
-            negative_prompt=job_data[6],
-            model=job_data[7],
-            steps=job_data[8],
-            channel=job_data[9],
-            image_link=job_data[10],
-            resolution=job_data[11],
-            batch_size=job_data[12],
-            config_scale=job_data[13]
+            id=job_data['job_id'],
+            requested_at=job_data['requested_at'],
+            started_at=job_data['started_at'],
+            request_type=job_data['request_type'],
+            # requester=None,
+            requested_prompt=job_data['requested_prompt'],
+            negative_prompt=job_data['negative_prompt'],
+            model=job_data['model'],
+            steps=job_data['steps'],
+            channel=job_data['channel'],
+            image_link=job_data['image_link'],
+            resolution=job_data['resolution'],
+            batch_size=job_data['batch_size'],
+            config_scale=job_data['config_scale']
         )
         print(f"Processing job: {job.id} with prompt: {job.requested_prompt}")
         images = run_job(args, job, hashes)
@@ -254,7 +261,7 @@ def job_loop(args):
             print("No images generated, skipping upload.")
             continue
 
-        upload_images(args, images, job.user)  # Upload images to the server
+        upload_images(args, images, job)  # Upload images to the server
 
 
 if __name__ == "__main__":

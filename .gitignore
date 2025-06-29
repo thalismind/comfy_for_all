@@ -162,3 +162,6 @@ job_client.log
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Project specific
+checkpoint_db.json
