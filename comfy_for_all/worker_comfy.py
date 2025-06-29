@@ -13,7 +13,7 @@ import requests
 import time
 
 from gpu_nvidia import GPUIdleTimer
-from hashes import hash_directory, load_hashes
+from hashes import hash_directory, hash_to_model_name
 from models import ImageJob
 
 def queue_prompt(args, prompt):
@@ -71,6 +71,8 @@ def parse_size(size_str):
 
 def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
   width, height = parse_size(job.size)
+  model_name = hash_to_model_name(job.model, hashes)
+
   prompt = {
       "3": {
           "class_type": "KSampler",
@@ -102,7 +104,7 @@ def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
       "4": {
           "class_type": "CheckpointLoaderSimple",
           "inputs": {
-              "ckpt_name": job.model,
+              "ckpt_name": model_name,
           }
       },
       "5": {
