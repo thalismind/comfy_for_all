@@ -40,36 +40,36 @@ def hash_file(filepath):
             sha256.update(chunk)
     return sha256.hexdigest()
 
-def add_file_hash_if_new(filepath):
+def add_file_hash_if_new(root, filepath):
     hashes = load_hashes()
 
-    filename = os.path.basename(filepath)
+    hash_name = os.path.relpath(filepath, start=root)
 
     # Check if hash already exists in any [hash, filename] entry
-    if not any(entry[1] == filename for entry in hashes):
+    if not any(entry[1] == hash_name for entry in hashes):
         file_hash = hash_file(filepath)
-        hashes.append([file_hash, filename])
+        hashes.append([file_hash, hash_name])
         save_hashes(hashes)
-        print(f":white_check_mark: Added new hash for {filename}")
+        print(f":white_check_mark: Added new hash for {hash_name}")
     else:
-        print(f":warning: Hash for {filename} already exists.")
+        print(f":warning: Hash for {hash_name} already exists.")
 
     return hashes
 
-def hash_directory(directory):
-    if not os.path.exists(directory):
-        print(f"Directory {directory} does not exist.")
+def hash_directory(root):
+    if not os.path.exists(root):
+        print(f"Directory {root} does not exist.")
         return
 
     # Find all .safetensors files in the directory using globs
-    files = glob.glob(os.path.join(directory, '**', '*.safetensors'), recursive=True)
+    files = glob.glob(os.path.join(root, '**', '*.safetensors'), recursive=True)
     if not files:
-        print(f"No .safetensors files found in {directory}.")
+        print(f"No .safetensors files found in {root}.")
         return
 
-    print(f"Found {len(files)} .safetensors files in {directory}.")
+    print(f"Found {len(files)} .safetensors files in {root}.")
     for filepath in files:
-        hashes = add_file_hash_if_new(filepath)
+        hashes = add_file_hash_if_new(root, filepath)
 
     print(f"Total hashes saved: {len(hashes)}")
     return hashes

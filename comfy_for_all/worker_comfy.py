@@ -72,6 +72,7 @@ def parse_size(size_str):
 def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
   width, height = parse_size(job.size)
   model_name = hash_to_model_name(job.model, hashes)
+  print(f"Using model {model_name} for job {job.id} with {job.batch_size} images of size {width}x{height}.")
 
   prompt = {
       "3": {
