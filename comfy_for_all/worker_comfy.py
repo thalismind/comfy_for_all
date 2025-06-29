@@ -11,6 +11,7 @@ import io
 import argparse
 import requests
 import time
+import random
 
 from gpu_nvidia import GPUIdleTimer
 from hashes import hash_directory, hash_to_model_name
@@ -72,13 +73,14 @@ def parse_size(size_str):
 def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
   width, height = parse_size(job.size)
   model_name = hash_to_model_name(job.model, hashes)
-  print(f"Using model {model_name} for job {job.id} with {job.batch_size} images of size {width}x{height}.")
+  seed = random.randint(0, 2**32 - 1)
+  print(f"Using model {model_name} for job {job.id} with {job.batch_size} images of size {width}x{height} and seed {seed}.")
 
   prompt = {
       "3": {
           "class_type": "KSampler",
           "inputs": {
-              "cfg": job.cfg,
+              "cfg": job.config_scale,
               "denoise": 1,
               "latent_image": [
                   "5",
@@ -98,7 +100,7 @@ def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
               ],
               "sampler_name": "euler",
               "scheduler": "normal",
-              "seed": job.seed,
+              "seed": seed,
               "steps": job.steps,
           }
       },
@@ -123,7 +125,7 @@ def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
                   "4",
                   1
               ],
-              "text": job.prompt,
+              "text": job.requested_prompt,
           }
       },
       "7": {
@@ -245,7 +247,7 @@ def job_loop(args):
             batch_size=job_data[12],
             config_scale=job_data[13]
         )
-        print(f"Processing job: {job.id} with prompt: {job.prompt}")
+        print(f"Processing job: {job.id} with prompt: {job.requested_prompt}")
         images = run_job(args, job, hashes)
         print(f"Job {job.id} completed with {len(images)} images.")
         if not images:
