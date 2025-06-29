@@ -2,15 +2,16 @@ from pydantic import BaseModel
 
 class ImageJob(BaseModel):
     id: int
-    created_at: str
-    updated_at: str
-    job_type: str
-    user: int
-    prompt: str
-    negative_prompt: str
+    requested_at: str
+    started_at: str | None = None
+    request_type: str
+    requester: str
+    requested_prompt: str
+    negative_prompt: str | None = None
     model: str
     steps: int
-    seed: int
-    size: str
+    channel: str
+    image_link: str | None = None
+    resolution: str
     batch_size: int
-    cfg: float
+    config_scale: int

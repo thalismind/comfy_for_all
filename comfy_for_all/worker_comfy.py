@@ -231,19 +231,19 @@ def job_loop(args):
 
         job = ImageJob(
             id=job_data[0],
-            created_at=job_data[1],
-            updated_at=job_data[1], # what about 2?
-            job_type=job_data[3],
-            user=job_data[4],
-            prompt=job_data[5],
+            requested_at=job_data[1],
+            started_at=job_data[2],
+            request_type=job_data[3],
+            requester=job_data[4],
+            requested_prompt=job_data[5],
             negative_prompt=job_data[6],
             model=job_data[7],
             steps=job_data[8],
-            seed=job_data[9],
-            # not sure what 10 is
-            size=job_data[11],
+            channel=job_data[9],
+            image_link=job_data[10],
+            resolution=job_data[11],
             batch_size=job_data[12],
-            cfg=job_data[13]
+            config_scale=job_data[13]
         )
         print(f"Processing job: {job.id} with prompt: {job.prompt}")
         images = run_job(args, job, hashes)
