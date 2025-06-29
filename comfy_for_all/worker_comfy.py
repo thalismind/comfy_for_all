@@ -12,6 +12,8 @@ import argparse
 import requests
 import time
 
+from gpu_nvidia import GPUIdleTimer
+from hashes import hash_directory, load_hashes
 from models import ImageJob
 
 def queue_prompt(args, prompt):
@@ -67,7 +69,7 @@ def parse_size(size_str):
     except ValueError:
         raise ValueError("Size must be in the format 'widthxheight', e.g., '512x512'.")
 
-def generate_prompt(job: ImageJob):
+def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
   width, height = parse_size(job.size)
   prompt = {
       "3": {
@@ -157,8 +159,8 @@ def generate_prompt(job: ImageJob):
   }
   return prompt
 
-def run_job(args, job):
-  prompt = generate_prompt(job)
+def run_job(args, job, hashes):
+  prompt = generate_prompt(job, hashes)
 
   ws = websocket.WebSocket()
   ws.connect("ws://{}/ws?clientId={}".format(args.comfy_server, args.client_id))
@@ -180,6 +182,9 @@ def parse_args():
     parser.add_argument('--client_id', type=str, default=str(uuid.uuid4()), help='Client ID for the WebSocket connection')
     parser.add_argument('--single_job', action='store_true', help='Run a single job and exit')
     parser.add_argument('--polling_interval', type=int, default=30, help='Polling interval in seconds for job fetching')
+    parser.add_argument('--gpu_index', type=int, default=0, help='GPU index to monitor for idle state')
+    parser.add_argument('--idle_threshold', type=int, default=900, help='Idle threshold in seconds for GPU')
+    parser.add_argument('--safetensors_dir', type=str, default='safetensors', help='Directory to store safetensors files')
     return parser.parse_args()
 
 def get_job(args):
@@ -200,37 +205,51 @@ def upload_images(args, images, channel):
         print(f"Failed to upload images: {response.status_code} - {response.text}")
 
 def job_loop(args):
-    while True:
-        # Get the next job from the server
-        job_data = get_job(args)
-        if job_data:
-            job = ImageJob(
-                id=job_data[0],
-                created_at=job_data[1],
-                updated_at=job_data[1], # what about 2?
-                job_type=job_data[3],
-                user=job_data[4],
-                prompt=job_data[5],
-                negative_prompt=job_data[6],
-                model=job_data[7],
-                steps=job_data[8],
-                seed=job_data[9],
-                # not sure what 10 is
-                size=job_data[11],
-                batch_size=job_data[12],
-                cfg=job_data[13]
-            )
-            print(f"Processing job: {job.id} with prompt: {job.prompt}")
-            images = run_job(args, job)
-            print(f"Job {job.id} completed with {len(images)} images.")
-            if not images:
-                print("No images generated, skipping upload.")
-                continue
+    idle_timer = GPUIdleTimer(gpu_index=args.gpu_index, idle_threshold=args.idle_threshold)
+    idle_timer.load_nvml()  # Initialize NVML for GPU monitoring
 
-            upload_images(args, images, job.user)  # Upload images to the server
-        else:
+    hashes = hash_directory(args.safetensors_dir)  # Load or hash safetensors files
+
+    while True:
+        # Increment the idle timer and check if the GPU is idle
+        idle_timer.increment_timer()
+        if not idle_timer.has_reached_idle_threshold():
+            print(f"GPU {idle_timer.gpu_index} has only been idle for {idle_timer.idle_time:0.2f} seconds, waiting.")
+            time.sleep(args.polling_interval)
+            continue
+
+        # Get the next job from the server
+        print(f"GPU {idle_timer.gpu_index} has been idle for {idle_timer.idle_time:0.2f} seconds, getting next job.")
+        job_data = get_job(args)
+        if not job_data:
             print("No jobs available, waiting...")
             time.sleep(args.polling_interval)
+            continue
+
+        job = ImageJob(
+            id=job_data[0],
+            created_at=job_data[1],
+            updated_at=job_data[1], # what about 2?
+            job_type=job_data[3],
+            user=job_data[4],
+            prompt=job_data[5],
+            negative_prompt=job_data[6],
+            model=job_data[7],
+            steps=job_data[8],
+            seed=job_data[9],
+            # not sure what 10 is
+            size=job_data[11],
+            batch_size=job_data[12],
+            cfg=job_data[13]
+        )
+        print(f"Processing job: {job.id} with prompt: {job.prompt}")
+        images = run_job(args, job, hashes)
+        print(f"Job {job.id} completed with {len(images)} images.")
+        if not images:
+            print("No images generated, skipping upload.")
+            continue
+
+        upload_images(args, images, job.user)  # Upload images to the server
 
 
 if __name__ == "__main__":
