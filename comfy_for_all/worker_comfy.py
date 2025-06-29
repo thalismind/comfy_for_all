@@ -207,7 +207,13 @@ def get_job(args):
 
 def upload_images(args, images, job):
     url = f"{args.job_server}/api/upload"
-    files = [('images', (f'image_{i}.png', io.BytesIO(image.tobytes()), 'image/png')) for i, image in enumerate(images)]
+    files = []
+    for i, image in enumerate(images):
+        image_bytes = io.BytesIO()
+        image.save(image_bytes, format='PNG')
+        image_bytes.seek(0)  # Reset the stream position to the beginning
+        files.append(("images", (f"image_{i}.png", image_bytes, "image/png")))
+
     response = requests.post(url, files=files, params={'channel': job.channel, 'job_id': job.id})
     if response.status_code == 200:
         print("Images uploaded successfully.")
