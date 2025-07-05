@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
 
-class Node(BaseModel):
-  ...
+
+class Node(BaseModel): ...
+
 
 class Workflow(BaseModel):
-  nodes: dict[str, Node]
+    nodes: dict[str, Node]
