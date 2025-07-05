@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 
+
 class ImageJob(BaseModel):
     id: int
     requested_at: str
