@@ -167,3 +167,4 @@ Thumbs.db
 checkpoint_db.json
 client.json
 lora_db.json
+*.safetensors

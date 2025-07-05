@@ -231,7 +231,7 @@ def job_loop(args: ComfyWorkerArgs):
             print("No images generated, skipping upload.")
             continue
 
-        upload_images(args, images, job)  # Upload images to the server
+        upload_images(args, client, images, job)  # Upload images to the server
 
 
 if __name__ == "__main__":
@@ -239,18 +239,16 @@ if __name__ == "__main__":
     if args.single_job:
         job = ImageJob(
             id=str(uuid.uuid4()),
-            created_at="2023-10-01T00:00:00Z",
-            updated_at="2023-10-01T00:00:00Z",
-            job_type="generate",
-            user=1,
-            prompt="A beautiful landscape",
+            requested_at="2023-10-01T00:00:00Z",
+            started_at="2023-10-01T00:00:00Z",
+            request_type="generate",
+            requested_prompt="A beautiful landscape",
             negative_prompt="bad hands, blurry, low quality",
             model="pony/realcartoon-pony.safetensors",
             steps=50,
-            seed=42,
-            size="512x512",
+            resolution="512x512",
             batch_size=1,
-            cfg=7.5,
+            config_scale=7.5,
         )
         run_job(job)
     else:

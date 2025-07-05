@@ -67,6 +67,7 @@ def get_job(
         "checkpoints": [hash[0] for hash in hashes],
         "worker_id": client.worker_id,
     }
+
     response = requests.get(f"{args.job_server}/api/get-job", json=data)
     if response.status_code == 200:
         job_data = response.json()
@@ -104,9 +105,12 @@ def upload_images(args: BaseWorkerArgs, client: BaseWorkerFile, images, job: Ima
 
     response = requests.post(
         url,
-        data={"worker_id": client.worker_id},
+        data={
+            "channel": job.channel,
+            "job_id": job.id,
+            "worker_id": client.worker_id,
+        },
         files=files,
-        params={"channel": job.channel, "job_id": job.id},
     )
     if response.status_code == 200:
         print("Images uploaded successfully.")
@@ -140,9 +144,10 @@ def login(args: BaseWorkerArgs) -> BaseWorkerFile:
         with open(args.client_file, "w") as f:
             json.dump(client_data.model_dump(), f)
 
-        if new_client and "created" in updated_data:
+        client_created = updated_data.get("created", False)
+        if new_client and client_created:
             print(f"New client created with ID: {client_data.worker_id}")
-        elif not new_client and "created" not in updated_data:
+        elif not new_client and not client_created:
             print(f"Logged in with existing client ID: {client_data.worker_id}")
         else:
             print(f"Something weird happened, client data: {updated_data}")
