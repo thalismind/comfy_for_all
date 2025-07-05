@@ -165,3 +165,5 @@ Thumbs.db
 
 # Project specific
 checkpoint_db.json
+client.json
+lora_db.json

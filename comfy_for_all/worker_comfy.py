@@ -1,29 +1,34 @@
-#This is an example that uses the websockets api to know when a prompt execution is done
-#Once the prompt execution is done it downloads the images using the /history endpoint
-
-import websocket #NOTE: websocket-client (https://github.com/websocket-client/websocket-client)
+import websocket # NOTE: websocket-client (https://github.com/websocket-client/websocket-client)
 import uuid
 import json
 import urllib.request
 import urllib.parse
 from PIL import Image
 import io
-import argparse
-import requests
 import time
 import random
 
 from gpu_nvidia import GPUIdleTimer
 from hashes import hash_directory, hash_to_model_name
 from models import ImageJob
+from worker_base import get_job, upload_images, BaseWorkerArgs, login, base_parser
 
-def queue_prompt(args, prompt):
-    p = {"prompt": prompt, "client_id": args.client_id}
+class ComfyWorkerArgs(BaseWorkerArgs):
+    comfy_id: str
+    comfy_server: str
+
+    def __init__(self, comfy_id=uuid.uuid4().hex, comfy_server='', **kwargs):
+        super().__init__(**kwargs)
+        self.comfy_id = comfy_id
+        self.comfy_server = comfy_server
+
+def queue_prompt(args: ComfyWorkerArgs, prompt):
+    p = {"prompt": prompt, "client_id": args.comfy_id}
     data = json.dumps(p).encode('utf-8')
     req =  urllib.request.Request("http://{}/prompt".format(args.comfy_server), data=data)
     return json.loads(urllib.request.urlopen(req).read())
 
-def get_image(args, filename, subfolder, folder_type):
+def get_image(args: ComfyWorkerArgs, filename, subfolder, folder_type):
     data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
     url_values = urllib.parse.urlencode(data)
     complete_url = "http://{}/view?{}".format(args.comfy_server, url_values)
@@ -32,11 +37,11 @@ def get_image(args, filename, subfolder, folder_type):
     with urllib.request.urlopen(complete_url) as response:
         return response.read()
 
-def get_history(args, prompt_id):
+def get_history(args: ComfyWorkerArgs, prompt_id):
     with urllib.request.urlopen("http://{}/history/{}".format(args.comfy_server, prompt_id)) as response:
         return json.loads(response.read())
 
-def get_images(args, ws, prompt):
+def get_images(args: ComfyWorkerArgs, ws, prompt):
     prompt_id = queue_prompt(args, prompt)['prompt_id']
     output_images = {}
     while True:
@@ -46,12 +51,12 @@ def get_images(args, ws, prompt):
             if message['type'] == 'executing':
                 data = message['data']
                 if data['node'] is None and data['prompt_id'] == prompt_id:
-                    break #Execution is done
+                    break # Execution is done
         else:
             # If you want to be able to decode the binary stream for latent previews, here is how you can do it:
             # bytesIO = BytesIO(out[8:])
             # preview_image = Image.open(bytesIO) # This is your preview in PIL image format, store it in a global
-            continue #previews are binary data
+            continue # Previews are binary data
 
     history = get_history(args, prompt_id)[prompt_id]
     for node_id in history['outputs']:
@@ -167,11 +172,11 @@ def generate_prompt(job: ImageJob, hashes: list[tuple[str, str]]):
   }
   return prompt
 
-def run_job(args, job, hashes):
+def run_job(args: ComfyWorkerArgs, job, hashes):
   prompt = generate_prompt(job, hashes)
 
   ws = websocket.WebSocket()
-  ws.connect("ws://{}/ws?clientId={}".format(args.comfy_server, args.client_id))
+  ws.connect("ws://{}/ws?clientId={}".format(args.comfy_server, args.comfy_id))
   images = get_images(args, ws, prompt)
   ws.close()
 
@@ -185,50 +190,19 @@ def run_job(args, job, hashes):
 
   return output_images
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Run a job on ComfyUI server.")
-    parser.add_argument('--job_server', type=str, default='http://127.0.0.1:5000', help='Job server address')
+def parse_args() -> ComfyWorkerArgs:
+    parser = base_parser()
+    parser.add_argument('--comfy_id', type=str, default=uuid.uuid4().hex, help='Unique ID for the ComfyUI worker')
     parser.add_argument('--comfy_server', type=str, default='127.0.0.1:8188', help='ComfyUI server address')
-    parser.add_argument('--client_id', type=str, default=str(uuid.uuid4()), help='Client ID for the WebSocket connection')
-    parser.add_argument('--single_job', action='store_true', help='Run a single job and exit')
-    parser.add_argument('--polling_interval', type=int, default=30, help='Polling interval in seconds for job fetching')
-    parser.add_argument('--gpu_index', type=int, default=0, help='GPU index to monitor for idle state')
-    parser.add_argument('--idle_threshold', type=int, default=900, help='Idle threshold in seconds for GPU')
-    parser.add_argument('--safetensors_dir', type=str, default='safetensors', help='Directory to store safetensors files')
-    return parser.parse_args()
+    return parser.parse_args(namespace=ComfyWorkerArgs)
 
-def get_job(args, hashes):
-    print(args, hashes)
-    data = {
-        "checkpoints": [hash[0] for hash in hashes],
-    }
-    response = requests.get(f"{args.job_server}/api/get-job", json=data)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print("No jobs available or error fetching job.")
-        return None
+def job_loop(args: ComfyWorkerArgs):
+    client = login(args)
 
-def upload_images(args, images, job):
-    url = f"{args.job_server}/api/upload"
-    files = []
-    for i, image in enumerate(images):
-        image_bytes = io.BytesIO()
-        image.save(image_bytes, format='PNG')
-        image_bytes.seek(0)  # Reset the stream position to the beginning
-        files.append(("images", (f"image_{i}.png", image_bytes, "image/png")))
-
-    response = requests.post(url, files=files, params={'channel': job.channel, 'job_id': job.id})
-    if response.status_code == 200:
-        print("Images uploaded successfully.")
-    else:
-        print(f"Failed to upload images: {response.status_code} - {response.text}")
-
-def job_loop(args):
     idle_timer = GPUIdleTimer(gpu_index=args.gpu_index, idle_threshold=args.idle_threshold)
     idle_timer.load_nvml()  # Initialize NVML for GPU monitoring
 
-    hashes = hash_directory(args.safetensors_dir)  # Load or hash safetensors files
+    hashes = hash_directory(args.checkpoint_dir)  # Load or hash safetensors files
 
     while True:
         # Increment the idle timer and check if the GPU is idle
@@ -240,30 +214,13 @@ def job_loop(args):
 
         # Get the next job from the server
         print(f"GPU {idle_timer.gpu_index} has been idle for {idle_timer.idle_time:0.2f} seconds, getting next job.")
-        job_data = get_job(args, hashes)
-        if not job_data:
+        job = get_job(args, client, hashes)
+        if not job:
             print("No jobs available, waiting...")
             time.sleep(args.polling_interval)
             continue
 
         # Create an ImageJob instance from the job data
-        print("Received job data:", job_data)
-        job = ImageJob(
-            id=job_data['job_id'],
-            requested_at=job_data['requested_at'],
-            started_at=job_data['started_at'],
-            request_type=job_data['request_type'],
-            # requester=None,
-            requested_prompt=job_data['requested_prompt'],
-            negative_prompt=job_data['negative_prompt'],
-            model=job_data['model'],
-            steps=job_data['steps'],
-            channel=job_data['channel'],
-            image_link=job_data['image_link'],
-            resolution=job_data['resolution'],
-            batch_size=job_data['batch_size'],
-            config_scale=job_data['config_scale']
-        )
         print(f"Processing job: {job.id} with prompt: {job.requested_prompt}")
         images = run_job(args, job, hashes)
         print(f"Job {job.id} completed with {len(images)} images.")

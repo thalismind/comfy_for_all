@@ -15,6 +15,36 @@ else:
 # Keep a list of processed jobs to avoid reprocessing
 processed_jobs = set()
 
+# Keep a list of client IDs to avoid duplicates
+worker_ids = set()
+
+@app.route('/api/init', methods=['GET'])
+def init_worker():
+    # Read the client ID from the request JSON body
+    data = request.get_json()
+    print("Login data:", data)
+
+    if not data or 'worker_id' not in data:
+        return jsonify({"error": "worker_id is required"}), 400
+
+    worker_id = data['worker_id']
+    created_worker = False
+    if worker_id == 'N/A':
+        # If worker_id is 'N/A', generate a new one
+        worker_id = f"worker_{len(worker_ids) + 1}"
+        created_worker = True
+        worker_ids.add(worker_id)
+        print(f"Generated new worker ID: {worker_id}")
+    else:
+        print(f"Using existing worker ID: {worker_id}")
+
+    # Return the worker ID and a success message
+    return jsonify({
+        "worker_id": worker_id,
+        "message": "Worker initialized successfully",
+        "created": created_worker,
+    }), 200
+
 @app.route('/api/get-job', methods=['GET'])
 def get_job():
     # Get a job from the queue folder
